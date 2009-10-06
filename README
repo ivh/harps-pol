@@ -1,0 +1,11 @@
+This is an extension to the reduction pipeline for the HARPS 
+spectrograph (see http://www.eso.org/sci/facilities/lasilla/instruments/harps/).
+It handles the polarization measurements.
+
+The bad code is not really my fault - I had to use existing routines. :-)
+
+The files need to be placed like this:
+DRS_HARPS/python/Recipes/obj_pol.py
+DRS_HARPS/python/Recipes/obj_sub_pol.py
+DRS_HARPS/config/kw_pol.py
+
