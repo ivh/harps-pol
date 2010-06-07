@@ -145,7 +145,7 @@ WLOG('info',log_opt,'Measuring %s from angles: %s'%(STOKES,str(angles)))
 # on the raw files.
 #
 
-WLOG('info',log_opt,'Starting the loop over the files and running the extraction obj_sub_pol.py on each of them.')
+WLOG('info',log_opt,'Starting the loop over the files and running the extraction obj_sub_POL_harps.py on each of them.')
 data=[]
 for i,filename in enumerate(arg_file_names):
     e2dsffb_fitsfilename={\
@@ -153,12 +153,12 @@ for i,filename in enumerate(arg_file_names):
             'B': os.path.join(dir_data_reduc,arg_night_name,string.replace(filename,'.fits','_e2dsffb_B.fits'))}
     
     if not (os.path.exists(e2dsffb_fitsfilename['A']) and os.path.exists(e2dsffb_fitsfilename['B']) ):
-        cmd='obj_sub_pol.py %s %s'%(arg_night_name,filename)
+        cmd='obj_sub_POL_harps.py %s %s'%(arg_night_name,filename)
         WLOG('info',log_opt,'Running sub-script: %s'%cmd)
-        err=os.system('obj_sub_pol.py %s %s'%(arg_night_name,filename))
+        err=os.system('obj_sub_POL_harps.py %s %s'%(arg_night_name,filename))
         if DEBUG: print 'Error code: %d'%err
         if err !=0:
-            WLOG('error',log_opt,'Running obj_sub_pol.py on %s failed!'%filename)
+            WLOG('error',log_opt,'Running obj_sub_POL_harps.py on %s failed!'%filename)
             exit(1)
 
     for fiber in ['A','B']:
@@ -172,7 +172,7 @@ for i,filename in enumerate(arg_file_names):
 ###
 ### Finished extraction
 ###
-WLOG('info',log_opt,'Finished running obj_sub_pol.py on all files.')
+WLOG('info',log_opt,'Finished running obj_sub_POL_harps.py on all files.')
 
 def ratio_single(data):
     """ IMPORTANT: This expects the list "data" to be sorted by angle, then fiber"""
