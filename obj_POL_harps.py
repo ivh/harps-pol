@@ -155,7 +155,7 @@ for i,filename in enumerate(arg_file_names):
     if not (os.path.exists(e2dsffb_fitsfilename['A']) and os.path.exists(e2dsffb_fitsfilename['B']) ):
         cmd='obj_sub_POL_harps.py %s %s'%(arg_night_name,filename)
         WLOG('info',log_opt,'Running sub-script: %s'%cmd)
-        err=os.system('obj_sub_POL_harps.py %s %s'%(arg_night_name,filename))
+        err=os.system(cmd)
         if DEBUG: print 'Error code: %d'%err
         if err !=0:
             WLOG('error',log_opt,'Running obj_sub_POL_harps.py on %s failed!'%filename)
