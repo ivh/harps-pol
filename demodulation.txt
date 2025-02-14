@@ -1,0 +1,135 @@
+obj_HARPSpol <night> <list_of_fits_files>
+
+1. Look for FITS keywords INS.MODE and INS.RET??:
+
+If all files contain INS.MODE and INS.RET25, e.g.
+
+  HIERARCH ESO INS MODE        = 'HARPSPOL'   / Instrument mode used.
+  HIERARCH ESO INS RET25 POS   =        270.0 / Abs pos of the lambda/4 plate
+
+  set a variable "polarization" to 'circular'. If the group contains files without
+  INS.MODE='HARPSPOL' or a mixture of INS.RET25 and INS.RET50 issue a corresponding
+  error message and finish.
+
+  Sort file pairs with angles RET25:
+        V
+  [ 45.0,135.0]
+  [225.0,315.0]
+
+  Legal values is (a) any single one or (b) both. This should come automatically
+  from the observing template but one must check and decide if we have one pair or two
+  pairs. If all is correct proceed remember with sorting and proceed with step 2.
+
+Else if all files contain INS.MODE and INS.RET50, e.g.
+
+  HIERARCH ESO INS MODE        = 'HARPSPOL'   / Instrument mode used.
+  HIERARCH ESO INS RET50 POS   =         22.5 / Abs pos of the lambda/2 plate
+
+  set a variable "polarization" to 'linear'. If the group contains files without
+  INS.MODE='HARPSPOL' or a mixture of INS.RET50 and INS.RET25 issue a corresponding
+  error message and finish.
+
+  Sort file pairs with angles RET50:
+        Q                           U
+  [  0.0, 45.0] |     |       [ 22.5, 67.5] |     |
+  [ 90.0,135.0] | |           [112.5,157.5] | |
+  [180.0,225.0]   | |         [202.5,247.5]   | |
+  [270.0,315.0]     | |       [292.5,337.5]     | |
+
+  Legal values is (a) any single one for Q  and any single one for U or (b) any consecutive
+  pair (including the last one paired with the first one). This should come automatically
+  from the observing template but one must check and decide if we have one pair for Q and
+  one pair for U or two pairs for each. If all is correct proceed remember with sorting and
+  proceed with step 2.
+
+EndIf
+
+
+2. Execute the part of obj_TWO_harps.py until line 419 which reads:
+   e2dsffb=e2dsff[fiber]/blaze[fiber]
+
+This should be done for both fibers in all exposures!
+
+The resulting e2dsffb are characterized by fiber ('A' or 'B') and angle or the retarder.
+
+3. The difference demodulation scheme
+
+3.1 They are combined in case of one pair per polarization as:
+
+        1    Fiber_B(angl1) - Fiber_A(angl1)   Fiber_B(angl2) - Fiber_A(angl2)
+    x = - * [------------------------------- - -------------------------------]
+        2    Fiber_B(angl1) + Fiber_A(angl1)   Fiber_B(angl2) + Fiber_A(angl2)
+
+    where x is V/I or Q/I or U/I
+        1
+    I = - * [Fiber_A(angl1) + Fiber_B(angl1) + Fiber_A(angl2) + Fiber_B(angl2)]
+        4
+
+3.2 If two pairs are available then:
+
+        1    Fiber_B(angl1) - Fiber_A(angl1)   Fiber_B(angl2) - Fiber_A(angl2)
+    x = - * [------------------------------- - ------------------------------- +
+        4    Fiber_B(angl1) + Fiber_A(angl1)   Fiber_B(angl2) + Fiber_A(angl2)
+
+             Fiber_B(angl3) - Fiber_A(angl3)   Fiber_B(angl4) - Fiber_A(angl4)
+           + ------------------------------- - -------------------------------]
+             Fiber_B(angl3) + Fiber_A(angl3)   Fiber_B(angl4) + Fiber_A(angl4)
+
+
+        1    Fiber_B(angl1) - Fiber_A(angl1)   Fiber_B(angl2) - Fiber_A(angl2)
+    N = - * [------------------------------- - ------------------------------- -
+        4    Fiber_B(angl1) + Fiber_A(angl1)   Fiber_B(angl2) + Fiber_A(angl2)
+
+             Fiber_B(angl3) - Fiber_A(angl3)   Fiber_B(angl4) - Fiber_A(angl4)
+           - ------------------------------- + -------------------------------]
+             Fiber_B(angl3) + Fiber_A(angl3)   Fiber_B(angl4) + Fiber_A(angl4)
+
+        1
+    I = - * [Fiber_A(angl1) + Fiber_B(angl1) + Fiber_A(angl2) + Fiber_B(angl2) +
+        8
+
+           + Fiber_A(angl3) + Fiber_B(angl3) + Fiber_A(angl4) + Fiber_B(angl4)]
+
+    N is a so-called null-spectrum that should be nearly perfectly zero for all
+    wavelengths. N is needed for quality control.
+
+4. The ratio demodulation scheme
+
+4.1 They are combined in case of one pair per polarization as:
+
+         R^(1/2) - 1           Fiber_B(angl1)   Fiber_A(angl2)
+    x =  ----------- where R = -------------- * --------------
+         R^(1/2) + 1           Fiber_A(angl1)   Fiber_B(angl2)
+
+    and x is V/I or Q/I or U/I. The Stokes I is as before:
+
+        1
+    I = - * [Fiber_A(angl1) + Fiber_B(angl1) + Fiber_A(angl2) + Fiber_B(angl2)]
+        4
+
+4.2 If two pairs are available then:
+
+        R^(1/4) - 1
+    x = -----------
+        R^(1/4) + 1
+
+             Fiber_B(angl1)   Fiber_A(angl2)   Fiber_B(angl3)   Fiber_A(angl4)
+   where R = -------------- * -------------- * -------------- * --------------
+             Fiber_A(angl1)   Fiber_B(angl2)   Fiber_A(angl3)   Fiber_B(angl4)
+
+       RN^(1/4) - 1
+   N = -----------
+       RN^(1/4) + 1
+
+
+              Fiber_B(angl1)   Fiber_A(angl2)   Fiber_A(angl3)   Fiber_B(angl4)
+   where RN = -------------- * -------------- * -------------- * --------------
+              Fiber_A(angl1)   Fiber_B(angl2)   Fiber_B(angl3)   Fiber_A(angl4)
+
+   The Stokes I is derived as before:
+
+        1
+    I = - * [Fiber_A(angl1) + Fiber_B(angl1) + Fiber_A(angl2) + Fiber_B(angl2) +
+        8
+
+           + Fiber_A(angl3) + Fiber_B(angl3) + Fiber_A(angl4) + Fiber_B(angl4)]
