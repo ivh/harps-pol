@@ -2,7 +2,8 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-import os, sys
+import os
+import sys
 from astropy.io import fits
 
 PRO_CATG_I = 'S2D_POL_I'
@@ -33,6 +34,7 @@ def main(prefix):
         axs[1].fill_between(W[order], S[order]-Se[order], S[order]+Se[order], alpha=0.1)
         axs[1].set_ylabel('Stokes/I')
         axs[2].plot(W[order],N[order],'-')
+        axs[2].fill_between(W[order], N[order]-Ne[order], N[order]+Ne[order], alpha=0.1)
         axs[2].set_ylabel('Null')
         axs[2].set_xlabel('Wavelength')
     plt.show()
