@@ -9,7 +9,9 @@ PRO_CATG_I = "S2D_POL_I"
 PRO_CATG_STOKES = "S2D_POL_STOKES"
 PRO_CATG_NULL = "S2D_POL_NULL"
 PRO_CATG_INA = "S2D_A"
-PRO_CATG_INBL = "S2D_BLAZE_A"
+PRO_CATG_INAB = "S2D_BLAZE_A"
+PRO_CATG_INB = "S2D_B"
+PRO_CATG_INBB = "S2D_BLAZE_B"
 
 
 def readspec(filename):
@@ -45,10 +47,10 @@ def save(fname, X, Xe, I, Ie, N=None, Ne=None):
         N = N.filled(np.nan) if isinstance(N, np.ma.MaskedArray) else N
         Ne = Ne.filled(np.nan) if isinstance(Ne, np.ma.MaskedArray) else Ne
 
-    if fname.endswith(f"{PRO_CATG_INA}.fits"):
-        insuff = PRO_CATG_INA
-    elif fname.endswith(f"{PRO_CATG_INBL}.fits"):
-        insuff = PRO_CATG_INBL
+    if fname.endswith(f"{PRO_CATG_INB}.fits"):
+        insuff = PRO_CATG_INB
+    elif fname.endswith(f"{PRO_CATG_INBB}.fits"):
+        insuff = PRO_CATG_INBB
     else:
         print("Something fishy with filenames or their ordering!")
 
@@ -126,7 +128,9 @@ def demod2(fnames):
     # Error in I using sum rule for mean
     Ie = 0.25 * np.sqrt(e1a**2 + e1b**2 + e2a**2 + e2b**2)
 
-    save(fnames[0], X, Xe, I, Ie)
+    save(fnames[1], X, Xe, I, Ie) # OBS, using *second* file as template,
+                            # since fiber B has one less order and the waves
+                            # are not re-written and need to match
 
 
 def error_helper(Re, R):
@@ -192,10 +196,12 @@ def demod4(fnames):
     Re = R * np.sqrt((Rae / Ra) ** 2 + (Rbe / Rb) ** 2)
     Ne = error_helper(Re, R)
 
-    save(fnames[0], X, Xe, I, Ie, N, Ne)
+    save(fnames[1], X, Xe, I, Ie, N, Ne) # see comment at end of demod2()
 
 
 if __name__ == "__main__":
+    
+    # This assumes filename sorting results in order 1a, 1b, 2a, 2b, 3a, 3b, 4a, 4b
     fnames = sorted(sys.argv[1:])
     print(fnames)
 
