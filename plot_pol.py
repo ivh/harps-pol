@@ -2,9 +2,11 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+plt.ion()
 import os
 import sys
 from astropy.io import fits
+from pathlib import Path
 
 PRO_CATG_I = 'S2D_POL_I'
 PRO_CATG_STOKES = 'S2D_POL_STOKES'
@@ -37,8 +39,48 @@ def main(prefix):
         axs[2].fill_between(W[order], N[order]-Ne[order], N[order]+Ne[order], alpha=0.1)
         axs[2].set_ylabel('Null')
         axs[2].set_xlabel('Wavelength')
-    plt.show()
+        
+    return locals()
+
+def plot_oldreduc(dir, prefix, W, axs, alpha=0.5):
+    oldred = dir/'../oldreduc'
+    oI=fits.open(oldred/(pref+f'_I.fits'))[0].data
+    if oI.shape[0]==71:
+        oI=np.delete(oI, 44, axis=0)
+    for order in range(oI.shape[0]):
+        axs[0].plot(W[order],oI[order],'k',alpha=alpha)
+    oN=fits.open(oldred/(pref+f'_Null.fits'))[0].data
+    if oN.shape[0]==71:
+        oN=np.delete(oN, 44, axis=0)
+    for order in range(oN.shape[0]):
+        axs[2].plot(W[order],oN[order],'k',alpha=alpha)
+    oS=fits.open(oldred/(pref+f'_v.fits'))[0].data
+    if oS.shape[0]==71:
+        oS=np.delete(oS, 44, axis=0)
+    for order in range(oS.shape[0]):
+        axs[1].plot(W[order],oS[order],'k',alpha=alpha)
+
+def plot_alexis(dir, prefix, W, axs, alpha=0.5,scale=0.28):
+    d=fits.open(dir/'../alexisred'/(pref+f'_demodulated.fits'))[1].data
+    axs[0].plot(d['WAVE']*10,d['I']*scale,'k',alpha=alpha)
+    axs[1].plot(d['WAVE']*10,d['Stokes']*scale,'k',alpha=alpha)
+    axs[2].plot(d['WAVE']*10,d['Null']*scale,'k',alpha=alpha)
+    return locals()
     
 if __name__ == "__main__":
     prefix = sys.argv[1]
-    main(prefix)
+    locals().update(main(prefix))
+    
+    dir = Path(prefix).parent
+    pref = Path(prefix).name
+    pref=pref.removeprefix('r.')
+
+    #locals().update(plot_oldreduc(dir, pref, W,axs, alpha=0.5))
+        
+    locals().update(plot_alexis(dir, pref, W,axs, alpha=0.5))
+
+    axs[0].set(xlim=(5459.5,5481))
+    axs[0].set(ylim=(30000,50000))
+    axs[1].set(ylim=(-0.025, 0.025))
+    axs[2].set(ylim=(-0.02622, 0.01409))
+
