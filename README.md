@@ -13,5 +13,12 @@ and timestamp with the first of the files given. The suffixes are
 * _S2D_POL_STOKES.fits for the Stokes parameters
 * _S2D_POL_NULL.fits for the null spectrum (only when 8 files provided)
 
-The files in old/ are the plugin to the old, python-based, HARPS
+For usage simply clone this repository and install the dependencies, 
+for example using [uv](https://docs.astral.sh/uv/):
+
+    uv venv && uv sync
+    uv run demod.py FILE1 FILE2 [FILE3 FILE4]
+
+
+The files in old/ are the plugin for the old python-based HARPS
 reduction pipeline.
