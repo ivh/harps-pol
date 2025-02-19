@@ -63,8 +63,8 @@ def plot_oldreduc(dir, prefix, W, axs, alpha=0.5):
 def plot_alexis(dir, prefix, W, axs, alpha=0.5,scale=0.28):
     d=fits.open(dir/'../alexisred'/(pref+f'_demodulated.fits'))[1].data
     axs[0].plot(d['WAVE']*10,d['I']*scale,'k',alpha=alpha)
-    axs[1].plot(d['WAVE']*10,d['Stokes']*scale,'k',alpha=alpha)
-    axs[2].plot(d['WAVE']*10,d['Null']*scale,'k',alpha=alpha)
+    axs[1].plot(d['WAVE']*10,d['Stokes'],'k',alpha=alpha)
+    axs[2].plot(d['WAVE']*10,d['Null'],'k',alpha=alpha)
     return locals()
     
 if __name__ == "__main__":
@@ -83,4 +83,3 @@ if __name__ == "__main__":
     axs[0].set(ylim=(30000,50000))
     axs[1].set(ylim=(-0.025, 0.025))
     axs[2].set(ylim=(-0.02622, 0.01409))
-
