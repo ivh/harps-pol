@@ -2,3 +2,7 @@
 __pycache__/
 *.py[cod]
 .uv/
+.pytest_cache/
+.ruff_cache/
+pyesorex.log
+esorex.log

@@ -1,12 +1,47 @@
 [project]
-name = "harpspol"
+name = "pyespdr"
 version = "0.1.0"
-description = "Demodulate S2D from HARPSPOL, made by the ESPRESSO pipeline"
+description = "Python recipes for the ESPRESSO/HARPS pipeline (espdr)"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "astropy>=7.0.1",
-    "ipython>=8.32.0",
     "matplotlib>=3.10.0",
+    "numpy>=2.0",
+    "pycpl>=1.0.4",
+    "pyesorex>=1.0.3",
     "scipy>=1.15.2",
 ]
+
+[dependency-groups]
+dev = [
+    "edps>=1.8.1",
+    "ipython>=8.32.0",
+    "pytest>=8.0",
+    "ruff>=0.14",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pyespdr"]
+
+[tool.uv.sources]
+pycpl = { index = "pycpl" }
+
+[[tool.uv.index]]
+name = "pycpl"
+url = "https://ivh.github.io/pycpl/simple/"
+
+[[tool.uv.index]]
+name = "eso"
+url = "https://ftp.eso.org/pub/dfs/pipelines/libraries/"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+# The old python-based HARPS pipeline plugin, kept for reference only.
+extend-exclude = ["old"]
