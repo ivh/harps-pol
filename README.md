@@ -54,32 +54,89 @@ orders are matched by their first wavelength rather than by a hard-coded index,
 and the products are written on fibre B's order set with its wavelength
 extensions passed through unchanged.
 
-## Usage
+## Trying it out
+
+Nothing here needs the C pipeline built or installed, so the recipe can be run
+on existing S2D products on any machine.
+
+**1. Get the code.** Needs Python 3.13 and [uv](https://docs.astral.sh/uv/).
 
 ```bash
+git clone https://github.com/ivh/harps-pol
+cd harps-pol
 uv sync
-export PYESOREX_PLUGIN_DIR="$(pwd)/pyrecipes"
-uv run pyesorex --recipes
-uv run pyesorex --man-page espdr_demod_pol
-uv run pyesorex espdr_demod_pol pol.sof
 ```
 
-On macOS, if you have ESO pipelines installed, run under `env -u
-DYLD_LIBRARY_PATH` so the bundled CPL is not shadowed by the system one.
+**2. Get some HARPSpol S2D products.** Any 2- or 4-exposure polarimetric
+template reduced with `espdr_sci_red` will do — what matters is the `S2D_A` and
+`S2D_B` pair per exposure. The dataset this was developed against is ESO
+programme **112.25MG.001**, night of **2024-01-02**, seven targets in
+`INS MODE = HARPSPOL` (`DPR TYPE = STAR,CIRPOL,...`, template
+`HARPS_pol_obs_all`): 29 CMa in a 4-exposure cycle, the rest in 2-exposure
+cycles. Raw frames come from the ESO archive; run them through `espdr_sci_red`
+as usual.
 
-There is also `demod.py` for use without pyesorex; it takes the S2D files
-directly and works out the fibre from the filename.
+**3. Write a SOF** listing both fibres of every exposure in the template:
+
+```
+/data/r.HARPS.2024-01-02T00:36:59.492_S2D_A.fits  S2D_A
+/data/r.HARPS.2024-01-02T00:36:59.492_S2D_B.fits  S2D_B
+/data/r.HARPS.2024-01-02T00:47:32.940_S2D_A.fits  S2D_A
+/data/r.HARPS.2024-01-02T00:47:32.940_S2D_B.fits  S2D_B
+/data/r.HARPS.2024-01-02T00:58:05.829_S2D_A.fits  S2D_A
+/data/r.HARPS.2024-01-02T00:58:05.829_S2D_B.fits  S2D_B
+/data/r.HARPS.2024-01-02T01:08:38.837_S2D_A.fits  S2D_A
+/data/r.HARPS.2024-01-02T01:08:38.837_S2D_B.fits  S2D_B
+```
+
+The order of the lines does not matter; the recipe sorts by retarder angle.
+
+**4. Run it.**
 
 ```bash
-uv run demod.py reduc/r.HARPS.2024-01-02T0[23]*_S2D_?.fits
+uv run pyesorex --recipe-dir=pyrecipes --recipes
+uv run pyesorex --recipe-dir=pyrecipes --man-page espdr_demod_pol
+uv run pyesorex --recipe-dir=pyrecipes espdr_demod_pol pol.sof
+```
+
+`--recipe-dir` can be replaced by `export PYESOREX_PLUGIN_DIR="$(pwd)/pyrecipes"`.
+
+On macOS, if ESO pipelines are installed, prefix with `env -u
+DYLD_LIBRARY_PATH` so the bundled CPL is not shadowed by the system one.
+
+### Using ESO's own PyCPL
+
+`pyproject.toml` pulls PyCPL from <https://ivh.github.io/pycpl/simple/>, an
+unofficial repackaging that bundles the C libraries so nothing has to be
+installed first. The recipe itself uses only `cpl.core` and `cpl.ui`, so ESO's
+own PyCPL should serve equally well — drop the `[tool.uv.sources]` block and the
+`pycpl` index from `pyproject.toml` and let it resolve from the `eso` index that
+is already listed. That path has not been tested here, since it needs a matching
+CPL installation.
+
+### Without pyesorex
+
+`demod.py` does the same thing straight from the command line, working out the
+fibre from the filename:
+
+```bash
+uv run demod.py /data/r.HARPS.2024-01-02T0[23]*_S2D_?.fits
 ```
 
 ## Tests
 
-`tests/test_demod.py` reproduces the reference products in
-`../112.25MG.001/reduc`, made by the pre-recipe version of this code. Point
-`$HARPSPOL_TEST_DATA` elsewhere if the data lives somewhere else; the tests skip
-if it is missing.
+```bash
+uv run pytest
+```
+
+`tests/test_demod.py` reproduces reference products made by the pre-recipe
+version of this code, for all seven targets of programme 112.25MG.001. The data
+is not in the repository: the tests look for a directory of `espdr_sci_red`
+output next to it (`../112.25MG.001/reduc`) and skip if it is missing. Point
+`$HARPSPOL_TEST_DATA` at your own copy — the timestamps the tests expect are
+listed in `SEQUENCES` at the top of the file, and the reference
+`_S2D_POL_*.fits` products have to sit alongside the `S2D_*` inputs. Without
+them the remaining tests still run.
 
 The 8-exposure path is tested against a synthetic template: the 29 CMa cycle
 re-observed as exposures 5-8. Two identical cycles must give back the
