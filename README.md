@@ -54,6 +54,24 @@ orders are matched by their first wavelength rather than by a hard-coded index,
 and the products are written on fibre B's order set with its wavelength
 extensions passed through unchanged.
 
+**Resampling.** The two fibres are sampled about 0.31 pixels apart (0.0044 A
+against a 0.0134 A pixel), so fibre B has to be put on fibre A's grid. The
+Stokes ratio is interpolated as a ratio, which has the continuum divided out
+and so interpolates better than either flux alone; the intensity needs the
+fluxes themselves, and those go through a flux-conserving rebin -- differencing
+a monotonic cubic interpolant of the cumulative flux, which is `espdr_rebin`'s
+algorithm with `gsl_interp_cspline` swapped for PCHIP so it cannot overshoot
+into negative flux. Both use PCHIP rather than linear interpolation: at HARPS's
+3.18 px/FWHM sampling and this grid offset, linear broadens a line by 6.3% and
+PCHIP by 2.4%. Pixels of fibre A's grid that fall outside fibre B's are masked
+rather than extrapolated.
+
+Exposure to exposure within one fibre the grids drift by only ~0.03 px (the
+barycentric velocity moves ~30 m/s across a sequence), which is not worth a
+further interpolation. Variance goes through the same operator as the flux,
+which ignores the correlation resampling introduces between neighbouring
+pixels -- as HDRL and `espdr_rebin` also do.
+
 ## Trying it out
 
 Nothing here needs the C pipeline built or installed, so the recipe can be run
@@ -147,10 +165,20 @@ asserts. No real repeated-cycle data was available.
 checks the task wiring. It needs the pipeline's workflow directory; point
 `$HARPS_WORKFLOW_DIR` at it if it is not in `~/pipes/harps-3.6.0/workflows`.
 
-One deliberate difference: the old code's `error_helper` used a `dX/dR` twice
-too large, so the Stokes and null **errors** of 4-exposure sequences were
-overestimated by a factor 2. The tests assert the new errors are half the
-reference ones there, and equal everywhere else. Fluxes are unchanged.
+Three deliberate differences from the reference products:
+
+- The old `error_helper` used a `dX/dR` twice too large, so the Stokes and null
+  **errors** of 4-exposure sequences were overestimated by a factor 2. The
+  tests assert the new errors are half the reference ones there, and equal
+  everywhere else.
+- The ratio is now interpolated with PCHIP rather than linearly.
+- The intensity now co-adds the two fibres after aligning them.
+
+The last two move the products by 2.4e-3 of peak rms at worst, so the reference
+comparison is an rms tolerance rather than a bit-level check. The numerics
+themselves are tested directly: flux conservation of the rebin, that only the
+extrapolated order edges get masked, and that PCHIP does not broaden a shifted
+line more than linear does.
 
 ## EDPS workflow
 

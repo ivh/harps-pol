@@ -13,7 +13,7 @@ interface in `pyrecipes/`, real work in `pyespdr/`, EDPS extension in
 - Run anything through `uv`. On macOS prefix with `env -u DYLD_LIBRARY_PATH`, or
   an installed ESO pipeline's CPL shadows the one PyCPL bundles and imports die
   with `Symbol not found: _cpl_wcs_duplicate`.
-- `uv run pytest` — 20 tests. 17 need the reference data next door
+- `uv run pytest` — 23 tests. 20 need the reference data next door
   (`../112.25MG.001/reduc`) and skip without it; the 3 workflow tests need
   `~/pipes/harps-3.6.0/workflows`.
 
@@ -72,6 +72,32 @@ only `S2D_POL_I` tells you which was used. That is how the flavour each
 reference product was made with was recovered — `demod_all.sh` uses plain S2D
 for the first four targets and blaze for the last three, and `SEQUENCES` in
 `tests/test_demod.py` records it.
+
+## Resampling
+
+Relevant numbers, all measured rather than assumed:
+
+- HARPS samples at **3.18 px/FWHM** median (2.71-3.85 across orders) at
+  R = 115000 over 3804-6915 A. Much kinder than the 2.0-2.5 that makes ANDES
+  marginal, so `[R-AND-115]`-style broadening limits are comfortable here.
+- Fibre A and fibre B grids are offset by **0.31 px** median, 0.77 px worst.
+- Exposure to exposure *within* a fibre the grids drift by only 0.011-0.035 px
+  over a 4-exposure sequence; BERV moves ~30 m/s. Negligible against the
+  fibre-to-fibre offset, so it is not corrected.
+- At that sampling and offset, worst case over grid phase: linear 1.092,
+  PCHIP / cubic spline 1.027. Hence PCHIP.
+
+`~/ANDES/pdr-rix/rebin_fwhm_R-AND-115.py` is the harness for this (it takes a
+method name and a sampling and returns the FWHM ratio); import it rather than
+re-deriving. Its conservative-rebin argument applies to *flux*, not to our
+Stokes ratio -- a ratio has no flux to conserve, and summing it over bins is
+meaningless, so the `cons_*` family's selling point is irrelevant there. Only
+the FWHM half of the argument transfers.
+
+Flux conservation of `_rebin_conservative` is exact by telescoping only when
+the output range equals the input range. Resampling B onto A's grid shifts the
+range by ~0.3 px at each end, and those edge pixels are masked, so a naive
+before/after flux sum comes out ~3e-4 low. That is the masking, not a bug.
 
 ## Pipelines on this machine
 

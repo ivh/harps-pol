@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from astropy.io import fits
-from scipy.interpolate import interp1d
+from scipy.interpolate import PchipInterpolator
 
 PRO_CATG_I = "S2D_POL_I"
 PRO_CATG_STOKES = "S2D_POL_STOKES"
@@ -63,6 +63,7 @@ class Spectrum:
     retarder: int
     mjd: float
     wave: np.ndarray
+    dll: np.ndarray
     flux: np.ma.MaskedArray
     err: np.ma.MaskedArray
     header: fits.Header = field(repr=False)
@@ -101,6 +102,7 @@ def read_s2d(filename: str, fiber: str) -> Spectrum:
         header = hdul[0].header.copy()
         flux = hdul["SCIDATA"].data
         wave = hdul["WAVEDATA_VAC_BARY"].data
+        dll = hdul["DLLDATA_VAC_BARY"].data
         err = hdul["ERRDATA"].data
 
     mask = (flux == 0) | np.isnan(flux)
@@ -112,6 +114,7 @@ def read_s2d(filename: str, fiber: str) -> Spectrum:
         retarder=retarder,
         mjd=float(header["MJD-OBS"]),
         wave=wave,
+        dll=dll,
         flux=np.ma.array(flux, mask=mask),
         err=np.ma.array(err, mask=mask),
         header=header,
@@ -280,12 +283,23 @@ def demodulate(seq_a: Sequence[Spectrum], seq_b: Sequence[Spectrum],
 
     wave_a = seq_a[0].wave
     wave_b = seq_b[0].wave
+    dll_a = seq_a[0].dll
     allspec = [s for pair in zip(seq_a, seq_b) for s in pair]
 
-    nspec = len(allspec)
-    intensity = sum(s.flux for s in allspec) / nspec
-    intensity_err = np.sqrt(sum(s.err**2 for s in allspec)) / nspec
+    # The two fibres are sampled about 0.3 pixels apart, so fibre B has to be
+    # put on fibre A's grid before they are co-added.  Exposure to exposure
+    # within one fibre the grids drift by only ~0.03 pixels (the barycentric
+    # velocity moves a few tens of m/s across a sequence), which is not worth
+    # a further interpolation.
+    aligned = [s if s.fiber == "A" else resample_spectrum(s, wave_a, dll_a)
+               for s in allspec]
 
+    nspec = len(aligned)
+    intensity = sum(s.flux for s in aligned) / nspec
+    intensity_err = np.sqrt(sum(s.err**2 for s in aligned)) / nspec
+
+    # The ratio is resampled as a ratio rather than built from the aligned
+    # fluxes: a ratio has the continuum divided out and interpolates better.
     rel_err = _relative_error(allspec)
     out: dict[str, np.ndarray] = {
         "I": intensity,
@@ -361,6 +375,7 @@ def _select_orders(spec: Spectrum, keep: np.ndarray) -> Spectrum:
         retarder=spec.retarder,
         mjd=spec.mjd,
         wave=spec.wave[keep],
+        dll=spec.dll[keep],
         flux=spec.flux[keep],
         err=spec.err[keep],
         header=spec.header,
@@ -373,12 +388,108 @@ def _select_orders(spec: Spectrum, keep: np.ndarray) -> Spectrum:
 
 def _resample_to(values: np.ma.MaskedArray, wave_from: np.ndarray,
                  wave_to: np.ndarray) -> np.ma.MaskedArray:
-    """Put a per-order quantity from one wavelength scale onto another."""
-    out = values.copy()
-    for i in range(out.shape[0]):
-        out[i] = interp1d(wave_from[i], out[i].filled(np.nan),
-                          fill_value="extrapolate", bounds_error=False)(wave_to[i])
-    return out
+    """Interpolate a per-order quantity onto another wavelength scale.
+
+    Monotonic cubic (PCHIP) rather than linear: at the ~0.3 pixel offset
+    between the two fibres' grids, linear interpolation broadens a
+    HARPS-sampled line by 6.3% and this by 2.4%.  Being monotonic it also
+    cannot overshoot the way a natural cubic spline can across a line core or a
+    masked gap, which for a flux ratio would mean going negative.
+
+    Only the unmasked samples enter the interpolation, so a masked pixel does
+    not poison the output around it.
+    """
+    data = np.ma.getdata(values)
+    mask = np.ma.getmaskarray(values) | ~np.isfinite(data)
+
+    out = np.empty_like(data, dtype=float)
+    out_mask = np.zeros(mask.shape, dtype=bool)
+    for i in range(data.shape[0]):
+        good = ~mask[i]
+        if good.sum() < 2:
+            out[i] = np.nan
+            out_mask[i] = True
+            continue
+        out[i] = PchipInterpolator(wave_from[i][good], data[i][good],
+                                   extrapolate=True)(wave_to[i])
+        out_mask[i] = _transfer_mask(mask[i], wave_from[i], wave_to[i])
+    return np.ma.array(out, mask=out_mask)
+
+
+def _bin_edges(wave: np.ndarray, dll: np.ndarray) -> np.ndarray:
+    """Pixel edges of one order, as espdr_rebin builds them."""
+    edges = np.concatenate([wave - dll / 2.0, [wave[-1] + dll[-1] / 2.0]])
+    if np.any(np.diff(edges) <= 0):
+        raise ValueError("Wavelength bin edges are not increasing")
+    return edges
+
+
+def _transfer_mask(mask: np.ndarray, wave_from: np.ndarray,
+                   wave_to: np.ndarray) -> np.ndarray:
+    """Carry a mask across grids, widening it by the samples it can reach."""
+    return np.interp(wave_to, wave_from, mask.astype(float),
+                     left=1.0, right=1.0) > 0.0
+
+
+def _rebin_conservative(values: np.ndarray, edges_from: np.ndarray,
+                        edges_to: np.ndarray) -> np.ndarray:
+    """Flux-conserving rebin: difference a monotonic cubic cumulative sum.
+
+    Total flux is exact by telescoping whatever the interpolant, and the
+    monotonic cubic keeps the line width (see :func:`_resample_to`).  This is
+    espdr_rebin's algorithm with gsl_interp_cspline swapped for PCHIP, which
+    cannot overshoot into negative flux.
+    """
+    cumulative = np.concatenate([[0.0], np.cumsum(values)])
+    return np.diff(PchipInterpolator(edges_from, cumulative,
+                                     extrapolate=True)(edges_to))
+
+
+def resample_spectrum(spec: Spectrum, wave_to: np.ndarray,
+                      dll_to: np.ndarray) -> Spectrum:
+    """Put a spectrum's flux and error onto another wavelength scale.
+
+    Used to align fibre B with fibre A before co-adding them into the
+    intensity; the two fibres are sampled about 0.3 pixels apart, so summing
+    them as they come smears the result.
+
+    The variance goes through the same conservative operator as the flux.  That
+    is an approximation: resampling correlates neighbouring output pixels and
+    no covariance is tracked, exactly as in HDRL and espdr_rebin.
+    """
+    flux = np.ma.getdata(spec.flux)
+    err = np.ma.getdata(spec.err)
+    mask = np.ma.getmaskarray(spec.flux) | ~np.isfinite(flux)
+
+    new_flux = np.empty_like(flux, dtype=float)
+    new_err = np.empty_like(err, dtype=float)
+    new_mask = np.zeros(mask.shape, dtype=bool)
+    for i in range(flux.shape[0]):
+        edges_from = _bin_edges(spec.wave[i], spec.dll[i])
+        edges_to = _bin_edges(wave_to[i], dll_to[i])
+        clean_flux = np.where(mask[i], 0.0, flux[i])
+        clean_var = np.where(mask[i], 0.0, err[i] ** 2)
+        new_flux[i] = _rebin_conservative(clean_flux, edges_from, edges_to)
+        new_err[i] = np.sqrt(
+            np.abs(_rebin_conservative(clean_var, edges_from, edges_to)))
+        new_mask[i] = _transfer_mask(mask[i], spec.wave[i], wave_to[i])
+
+    return Spectrum(
+        filename=spec.filename,
+        fiber=spec.fiber,
+        angle=spec.angle,
+        retarder=spec.retarder,
+        mjd=spec.mjd,
+        wave=wave_to,
+        dll=dll_to,
+        flux=np.ma.array(new_flux, mask=new_mask),
+        err=np.ma.array(new_err, mask=new_mask),
+        header=spec.header,
+        tpl_id=spec.tpl_id,
+        tpl_name=spec.tpl_name,
+        tpl_start=spec.tpl_start,
+        expno=spec.expno,
+    )
 
 
 def _check_wavelengths(waves: Sequence[np.ndarray], delta: float = 0.1) -> None:

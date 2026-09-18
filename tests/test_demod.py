@@ -1,7 +1,10 @@
 """Regression tests against the products of the original demod.py script.
 
 The reference products in ``112.25MG.001/reduc`` were made by the pre-recipe
-version of this code.  They are stored as float32, hence the 1e-6 tolerances.
+version of this code, which resampled linearly and co-added the two fibres
+without aligning them.  Both were changed deliberately, so the comparison is a
+"same spectrum, known numerics change" check rather than a bit-level one; see
+``test_agrees_with_reference_products`` for the tolerances and why.
 """
 
 import dataclasses
@@ -12,11 +15,16 @@ import pytest
 from astropy.io import fits
 
 from pyespdr.demod import (
+    _bin_edges,
+    _rebin_conservative,
+    _resample_to,
+    _select_orders,
     demodulate,
     demodulate_cycles,
     match_orders,
     order_sequence,
     read_s2d,
+    resample_spectrum,
     retarder_angle,
     split_cycles,
     stokes_parameter,
@@ -55,8 +63,15 @@ def _load(stamps, flavour):
     return seq_a, seq_b
 
 
+#: The deliberate numerics changes move the products by this much, as a
+#: fraction of each spectrum's peak: PCHIP instead of linear interpolation of
+#: the ratio, and fibre B resampled onto fibre A before co-adding the
+#: intensity.  Measured worst case over the seven targets is 2.4e-3.
+NUMERICS_RMS = 5e-3
+
+
 @pytest.mark.parametrize("target", sorted(SEQUENCES))
-def test_reproduces_reference_products(target):
+def test_agrees_with_reference_products(target):
     stamps, flavour = SEQUENCES[target]
     seq_a, seq_b = _load(stamps, flavour)
     products = demodulate(seq_a, seq_b, null=len(stamps) == 4)
@@ -70,15 +85,68 @@ def test_reproduces_reference_products(target):
             ref_err = hdul["ERRDATA"].data
 
         new_flux = products[key].filled(np.nan)
-        assert np.nanmax(np.abs(new_flux - ref_flux)) < 1e-6 * np.nanmax(
-            np.abs(ref_flux)), f"{target} {catg} flux"
+        rms = np.sqrt(np.nanmean((new_flux - ref_flux) ** 2))
+        assert rms < NUMERICS_RMS * np.nanmax(np.abs(ref_flux)), \
+            f"{target} {catg} flux"
 
         # The old 4-exposure code used dX/dR twice too large; everything else
-        # must match.
+        # must still come out at the same scale.
         expected = 0.5 if len(stamps) == 4 and key != "I" else 1.0
         new_err = products[key + "_ERR"].filled(np.nan)
-        assert np.nanmax(np.abs(new_err - expected * ref_err)) < 1e-6 * np.nanmax(
-            np.abs(ref_err)), f"{target} {catg} error"
+        ratio = np.nanmedian(new_err / ref_err)
+        assert ratio == pytest.approx(expected, rel=1e-3), \
+            f"{target} {catg} error scale"
+
+
+def test_conservative_rebin_conserves_flux():
+    """Onto the same range, differencing the cumulative flux telescopes."""
+    stamps, flavour = SEQUENCES["HD 54879"]
+    _, seq_b = _load(stamps, flavour)
+    spec = seq_b[0]
+    for order in (0, 35, 69):
+        edges = _bin_edges(spec.wave[order], spec.dll[order])
+        flux = np.ma.getdata(spec.flux)[order]
+        total = _rebin_conservative(flux, edges, np.array([edges[0], edges[-1]]))
+        assert total.sum() == pytest.approx(flux.sum(), rel=1e-5)
+
+
+def test_resampling_masks_the_extrapolated_edges():
+    """Fibre A's grid runs past fibre B's, and those pixels are not invented."""
+    stamps, flavour = SEQUENCES["HD 54879"]
+    seq_a, seq_b = _load(stamps, flavour)
+    keep = match_orders(seq_a[0].wave, seq_b[0].wave)
+    target = _select_orders(seq_a[0], keep)
+
+    before = np.ma.getmaskarray(seq_b[0].flux).sum()
+    after = resample_spectrum(seq_b[0], target.wave, target.dll)
+    mask = np.ma.getmaskarray(after.flux)
+    assert mask.sum() > before
+    # Only order edges, a handful of pixels out of 4096.
+    assert mask.sum() < 3 * mask.shape[0]
+    assert mask[:, 5:-5].sum() == 0
+
+
+def test_pchip_broadens_a_shifted_line_less_than_linear():
+    """The reason for the interpolant, at HARPS sampling and grid offset."""
+    sampling, shift = 3.18, 0.31  # px per FWHM, px between the fibres' grids
+    x = np.arange(81.0)
+    sigma = sampling / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+    line = np.exp(-0.5 * ((x - 40.0) / sigma) ** 2)
+
+    def fwhm(y):
+        half = y.max() / 2.0
+        above = np.where(y > half)[0]
+        return above[-1] - above[0]
+
+    wave = np.array([x])
+    shifted = np.array([x + shift])
+    values = np.ma.array(np.array([line]), mask=np.zeros((1, 81), bool))
+    pchip = _resample_to(values, wave, shifted)[0]
+    linear = np.interp(x + shift, x, line)
+
+    assert fwhm(np.asarray(pchip)) <= fwhm(linear)
+    # and it stays positive, which a natural cubic spline need not
+    assert np.all(np.asarray(pchip) > -1e-12)
 
 
 def test_sequence_order_comes_from_the_angle():
