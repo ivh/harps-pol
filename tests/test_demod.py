@@ -250,3 +250,18 @@ def test_stokes_falls_back_to_the_retarder_unit():
     seq_a, _ = _load(SEQUENCES["HD 54879"][0], "")
     no_template = [dataclasses.replace(s, tpl_name="") for s in seq_a]
     assert stokes_parameter(no_template) == "V"
+
+
+def test_errors_share_the_grid_and_mask_of_their_values():
+    """The ratio's error comes from the aligned spectra, so it lines up."""
+    stamps, flavour = SEQUENCES["29 CMa"]
+    seq_a, seq_b = _load(stamps, flavour)
+    products = demodulate(seq_a, seq_b, null=True)
+
+    for key in ("I", "STOKES", "NULL"):
+        value_mask = np.ma.getmaskarray(products[key])
+        error_mask = np.ma.getmaskarray(products[key + "_ERR"])
+        assert np.array_equal(value_mask, error_mask), key
+        # Order edges fibre B does not reach, plus whatever the inputs
+        # already had masked; either way a small fraction of the frame.
+        assert value_mask.sum() < 0.01 * value_mask.size

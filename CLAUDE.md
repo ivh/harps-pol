@@ -13,7 +13,7 @@ interface in `pyrecipes/`, real work in `pyespdr/`, EDPS extension in
 - Run anything through `uv`. On macOS prefix with `env -u DYLD_LIBRARY_PATH`, or
   an installed ESO pipeline's CPL shadows the one PyCPL bundles and imports die
   with `Symbol not found: _cpl_wcs_duplicate`.
-- `uv run pytest` — 23 tests. 20 need the reference data next door
+- `uv run pytest` — 24 tests. 20 need the reference data next door
   (`../112.25MG.001/reduc`) and skip without it; the 3 workflow tests need
   `~/pipes/harps-3.6.0/workflows`.
 
@@ -93,6 +93,14 @@ re-deriving. Its conservative-rebin argument applies to *flux*, not to our
 Stokes ratio -- a ratio has no flux to conserve, and summing it over bins is
 meaningless, so the `cons_*` family's selling point is irrelevant there. Only
 the FWHM half of the argument transfers.
+
+`_relative_error` must be handed the *aligned* spectra, not the native ones:
+R lives on fibre A's grid, so its error has to as well. With that, every
+product and its error carry an identical mask, which is what
+`test_errors_share_the_grid_and_mask_of_their_values` pins down. Most of that
+mask is not order edges — for the 29 CMa sequence 90 of 168 masked output
+pixels are interior, inherited from the 400 pixels the eight input frames
+already had masked.
 
 Flux conservation of `_rebin_conservative` is exact by telescoping only when
 the output range equals the input range. Resampling B onto A's grid shifts the

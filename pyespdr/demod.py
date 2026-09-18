@@ -256,7 +256,9 @@ def _relative_error(specs: Sequence[Spectrum]) -> np.ma.MaskedArray:
     """Relative error of the ratio R.
 
     Every spectrum enters R exactly once, as a numerator or a denominator, so
-    the relative errors simply add in quadrature regardless of which.
+    the relative errors simply add in quadrature regardless of which.  Pass the
+    fibre-aligned spectra: R lives on fibre A's grid and its error has to as
+    well.
     """
     return np.sqrt(sum((s.err / s.flux) ** 2 for s in specs))
 
@@ -298,9 +300,11 @@ def demodulate(seq_a: Sequence[Spectrum], seq_b: Sequence[Spectrum],
     intensity = sum(s.flux for s in aligned) / nspec
     intensity_err = np.sqrt(sum(s.err**2 for s in aligned)) / nspec
 
-    # The ratio is resampled as a ratio rather than built from the aligned
-    # fluxes: a ratio has the continuum divided out and interpolates better.
-    rel_err = _relative_error(allspec)
+    # The ratio itself is resampled as a ratio rather than built from the
+    # aligned fluxes -- a ratio has the continuum divided out and interpolates
+    # better -- but its error has to come from the aligned spectra, so that it
+    # lands on the same grid as the value it belongs to.
+    rel_err = _relative_error(aligned)
     out: dict[str, np.ndarray] = {
         "I": intensity,
         "I_ERR": intensity_err,

@@ -66,6 +66,9 @@ into negative flux. Both use PCHIP rather than linear interpolation: at HARPS's
 PCHIP by 2.4%. Pixels of fibre A's grid that fall outside fibre B's are masked
 rather than extrapolated.
 
+The ratio's *error* also comes from the aligned spectra, so it lands on the
+same grid as the value it belongs to; every product and its error share a mask.
+
 Exposure to exposure within one fibre the grids drift by only ~0.03 px (the
 barycentric velocity moves ~30 m/s across a sequence), which is not worth a
 further interpolation. Variance goes through the same operator as the flux,
