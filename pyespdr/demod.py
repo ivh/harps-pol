@@ -508,13 +508,20 @@ def _check_wavelengths(waves: Sequence[np.ndarray], delta: float = 0.1) -> None:
 
 def write_products(template: Spectrum, products: dict[str, np.ndarray],
                    inputs: Sequence[Spectrum], stokes: str,
-                   outdir: str = ".", version: str = "0.1") -> list[tuple[str, str]]:
+                   outdir: str | None = None,
+                   version: str = "0.1") -> list[tuple[str, str]]:
     """Write the demodulated spectra as S2D files, one per product.
 
     The first exposure of fibre B is used as the template, because fibre B
     carries the order set the products are on and the wavelength extensions are
     passed through unchanged.
+
+    Products land next to their inputs unless ``outdir`` says otherwise; a
+    recipe run under pyesorex passes ``"."``, since pyesorex collects products
+    from the working directory.
     """
+    if outdir is None:
+        outdir = os.path.dirname(template.filename)
     base = os.path.basename(template.filename)
     for tag in TAGS_B:
         if base.endswith(f"_{tag}.fits"):
@@ -542,6 +549,35 @@ def write_products(template: Spectrum, products: dict[str, np.ndarray],
 
 def _filled(a) -> np.ndarray:
     return a.filled(np.nan) if isinstance(a, np.ma.MaskedArray) else a
+
+
+#: A FITS card is 80 characters: "HIERARCH " + keyword + " = " + 'value'.
+_CARD_LENGTH = 80
+
+
+def _card_value(keyword: str, value: str) -> str:
+    """Trim a string so ``HIERARCH <keyword> = '<value>'`` still fits a card.
+
+    astropy has no CONTINUE convention for HIERARCH keywords, so an over-long
+    value raises rather than wrapping.  The tail of a filename is the
+    distinctive part, so that is what is kept.
+    """
+    room = _CARD_LENGTH - len("HIERARCH " + keyword + " = ") - 2
+    if len(value) <= room:
+        return value
+    return "..." + value[-(room - 3):]
+
+
+def _input_name(spec: Spectrum) -> str:
+    """Filename of an input, with the tag left to the adjacent CATG keyword.
+
+    Without dropping it, a blaze-corrected product's name overflows the card.
+    """
+    name = os.path.basename(spec.filename)
+    catg = str(spec.header.get("ESO PRO CATG", ""))
+    if catg and name.endswith(f"_{catg}.fits"):
+        return name[: -len(f"_{catg}.fits")] + ".fits"
+    return name
 
 
 def _next_rec_index(header: fits.Header) -> int:
@@ -582,7 +618,8 @@ def _set_product_header(header: fits.Header, catg: str,
         "ESO QC POL STOKES": stokes,
     }
     for i, spec in enumerate(inputs, start=1):
-        new[f"ESO PRO REC{rec} RAW{i} NAME"] = os.path.basename(spec.filename)
+        key = f"ESO PRO REC{rec} RAW{i} NAME"
+        new[key] = _card_value(key, _input_name(spec))
         new[f"ESO PRO REC{rec} RAW{i} CATG"] = spec.header.get("ESO PRO CATG", "")
 
     for key, value in new.items():

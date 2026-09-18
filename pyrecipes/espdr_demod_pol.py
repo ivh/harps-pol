@@ -106,8 +106,9 @@ class DemodPol(cpl.ui.PyRecipe):
 
         inputs = [s for cycle in zip(cycles_a, cycles_b)
                   for pair in zip(*cycle) for s in pair]
+        # pyesorex collects products from the working directory.
         written = write_products(cycles_b[0][0], products, inputs, stokes,
-                                 version=VERSION)
+                                 outdir=".", version=VERSION)
 
         out = cpl.ui.FrameSet()
         for filename, catg in written:

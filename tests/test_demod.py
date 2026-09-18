@@ -1,14 +1,18 @@
 """Regression tests against the products of the original demod.py script.
 
-The reference products in ``112.25MG.001/reduc`` were made by the pre-recipe
-version of this code, which resampled linearly and co-added the two fibres
-without aligning them.  Both were changed deliberately, so the comparison is a
-"same spectrum, known numerics change" check rather than a bit-level one; see
+The reference products are the ``*_S2D_POL_*_LINEAR.fits`` files in
+``112.25MG.001/reduc``: the output of the pre-recipe version of this code,
+which resampled the ratio linearly, co-added the two fibres without aligning
+them, and had the factor-2 error bug.  They are kept deliberately so this stays
+a comparison against an independent implementation rather than against our own
+current output.  The differences are intended, so the check is "same spectrum,
+known numerics change" rather than bit-level; see
 ``test_agrees_with_reference_products`` for the tolerances and why.
 """
 
 import dataclasses
 import os
+import tempfile
 
 import numpy as np
 import pytest
@@ -28,6 +32,7 @@ from pyespdr.demod import (
     retarder_angle,
     split_cycles,
     stokes_parameter,
+    write_products,
 )
 
 DATA = os.environ.get(
@@ -35,6 +40,10 @@ DATA = os.environ.get(
     os.path.join(os.path.dirname(__file__), "..", "..", "112.25MG.001", "reduc"),
 )
 PREFIX = "r.HARPS.2024-01-02T"
+
+#: The reference products predate the resampling changes; see the module
+#: docstring.  Regenerating ``*_S2D_POL_*.fits`` must not touch these.
+REFERENCE_SUFFIX = "_LINEAR"
 
 # target -> (timestamps in acquisition order, S2D flavour used for the reference)
 SEQUENCES = {
@@ -80,7 +89,7 @@ def test_agrees_with_reference_products(target):
                       ("NULL", "S2D_POL_NULL")):
         if key not in products:
             continue
-        with fits.open(_path(stamps[0], catg)) as hdul:
+        with fits.open(_path(stamps[0], catg + REFERENCE_SUFFIX)) as hdul:
             ref_flux = hdul["SCIDATA"].data
             ref_err = hdul["ERRDATA"].data
 
@@ -265,3 +274,22 @@ def test_errors_share_the_grid_and_mask_of_their_values():
         # Order edges fibre B does not reach, plus whatever the inputs
         # already had masked; either way a small fraction of the frame.
         assert value_mask.sum() < 0.01 * value_mask.size
+
+
+def test_blaze_input_names_fit_a_fits_card():
+    """Blaze filenames overflow 80 characters unless the tag is dropped."""
+    stamps, _ = SEQUENCES["del Cir"]
+    seq_a, seq_b = _load(stamps, "BLAZE_")
+    products = demodulate(seq_a, seq_b, null=False)
+    inputs = [s for pair in zip(seq_a, seq_b) for s in pair]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        written = write_products(seq_b[0], products, inputs, "V", outdir=tmp)
+        assert len(written) == 2
+        for filename, _ in written:
+            header = fits.getheader(filename)
+            assert header["ESO PRO REC2 RAW1 CATG"] == "S2D_BLAZE_A"
+            assert "_S2D_BLAZE_A" not in header["ESO PRO REC2 RAW1 NAME"]
+            assert stamps[0] in header["ESO PRO REC2 RAW1 NAME"]
+            for card in header.cards:
+                assert len(str(card)) <= 80

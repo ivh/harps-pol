@@ -150,8 +150,11 @@ uv run demod.py /data/r.HARPS.2024-01-02T0[23]*_S2D_?.fits
 uv run pytest
 ```
 
-`tests/test_demod.py` reproduces reference products made by the pre-recipe
-version of this code, for all seven targets of programme 112.25MG.001. The data
+`tests/test_demod.py` compares against `*_S2D_POL_*_LINEAR.fits`, the frozen
+output of the pre-recipe version of this code, for all seven targets of
+programme 112.25MG.001. Keeping those separate from the current
+`*_S2D_POL_*.fits` is what stops the test comparing the code against its own
+output. The data
 is not in the repository: the tests look for a directory of `espdr_sci_red`
 output next to it (`../112.25MG.001/reduc`) and skip if it is missing. Point
 `$HARPSPOL_TEST_DATA` at your own copy — the timestamps the tests expect are
