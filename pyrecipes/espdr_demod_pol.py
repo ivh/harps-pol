@@ -16,10 +16,34 @@ from pyespdr.demod import (
 )
 
 VERSION = "0.1"
+RECIPE = "espdr_demod_pol"
+
+#: espdr names its parameters "espdr.<recipe>.<param>" -- see the
+#: espdr.espdr_mflat.* entries in the pipeline's harps_parameters.yaml.  EDPS
+#: sets them by that full name, so ours have to match, and pyesorex keys
+#: ``settings`` by it too; the short form survives as the command-line alias.
+PREFIX = f"espdr.{RECIPE}."
+
+STOKES_CHOICES = ("AUTO", "I", "Q", "U", "V")
+
+
+def _aliased(parameter, alias: str):
+    parameter.cli_alias = alias
+    parameter.cfg_alias = alias
+    return parameter
+
+
+def validate_stokes(value: str) -> str:
+    """pyesorex does not enforce a ParameterEnum's alternatives itself."""
+    if value not in STOKES_CHOICES:
+        raise ValueError(
+            f"--stokes={value!r} is not one of "
+            f"{', '.join(STOKES_CHOICES)}")
+    return value
 
 
 class DemodPol(cpl.ui.PyRecipe):
-    _name = "espdr_demod_pol"
+    _name = RECIPE
     _version = VERSION
     _author = "Thomas Marquart"
     _email = "thomas.marquart@physics.uu.se"
@@ -45,28 +69,29 @@ class DemodPol(cpl.ui.PyRecipe):
     def __init__(self):
         self.parameters = cpl.ui.ParameterList(
             [
-                cpl.ui.ParameterValue(
-                    name="null",
-                    context=self._name,
+                _aliased(cpl.ui.ParameterValue(
+                    name=f"{PREFIX}null",
+                    context=RECIPE,
                     description="Compute the null spectrum (4-exposure cycles only)",
                     default=True,
-                ),
-                cpl.ui.ParameterValue(
-                    name="stokes",
-                    context=self._name,
+                ), "null"),
+                _aliased(cpl.ui.ParameterEnum(
+                    name=f"{PREFIX}stokes",
+                    context=RECIPE,
                     description=(
-                        "Stokes parameter (I, Q, U, V), or AUTO to derive it "
-                        "from the observing template"
+                        "Stokes parameter, or AUTO to derive it from the "
+                        "observing template"
                     ),
                     default="AUTO",
-                ),
+                    alternatives=list(STOKES_CHOICES),
+                ), "stokes"),
             ]
         )
 
     def run(self, frameset: cpl.ui.FrameSet,
             settings: dict[str, Any]) -> cpl.ui.FrameSet:
-        do_null = settings.get("null", True)
-        stokes = settings.get("stokes", "AUTO")
+        do_null = settings.get(f"{PREFIX}null", True)
+        stokes = validate_stokes(settings.get(f"{PREFIX}stokes", "AUTO"))
 
         specs_a, specs_b, blaze = _sort_frames(frameset)
         cpl.core.Msg.info(

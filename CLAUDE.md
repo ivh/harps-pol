@@ -13,7 +13,7 @@ interface in `pyrecipes/`, real work in `pyespdr/`, EDPS extension in
 - Run anything through `uv`. On macOS prefix with `env -u DYLD_LIBRARY_PATH`, or
   an installed ESO pipeline's CPL shadows the one PyCPL bundles and imports die
   with `Symbol not found: _cpl_wcs_duplicate`.
-- `uv run pytest` — 25 tests. 20 need the reference data next door
+- `uv run pytest` — 33 tests. 20 need the reference data next door
   (`../112.25MG.001/reduc`) and skip without it; the 3 workflow tests need
   `~/pipes/harps-3.6.0/workflows`.
 
@@ -167,6 +167,29 @@ The HARPS 3.6.0 workflow already handles HARPSpol:
   `.main_input.name`, `.input_filter` is a set of **strings**,
   `.grouping_keywords`, `.min_group_size`. Classification rules have no `.name`
   on every subclass.
+
+## Recipe parameters
+
+Getting these wrong fails silently, so:
+
+- The parameter's `name` must be the full `espdr.<recipe>.<param>`, as in the
+  pipeline's `harps_parameters.yaml`. pyesorex keys the `settings` dict by
+  `name`, and EDPS passes parameters through `--recipe-config` written with
+  that same full name (`edps/executor/recipe.py:_prepare_config_file`). A bare
+  `name="stokes"` is unreachable from a workflow, and a config file using the
+  alias is rejected outright.
+- `cli_alias` keeps the short `--stokes` on the command line. pyesorex exposes
+  *only* the alias there, never the full name — the opposite of the config
+  file.
+- pyesorex wants `--stokes=V`, after the recipe name. `--stokes V` fails with
+  `unrecognized arguments: <sof>`, blaming the SOF; the option before the
+  recipe name fails with `Expected a recipe name`.
+- `ParameterEnum` documents its `alternatives` in the man page but pyesorex
+  does **not** enforce them; validate in the recipe (`validate_stokes`).
+- `settings` contains only what the user actually passed, not every declared
+  parameter with its default, so `.get(name, default)` needs the default
+  repeated.
+- The man page advertises an environment-variable alias. It does not work.
 
 ## pyesorex / PyCPL
 

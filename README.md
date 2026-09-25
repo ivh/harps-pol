@@ -17,11 +17,17 @@ arrives as 4 or 8 S2D files. This recipe combines them with the ratio method.
 **Input**
 - SOF with either `S2D_A` / `S2D_B` or `S2D_BLAZE_A` / `S2D_BLAZE_B`, all
   exposures of one observing template. Mixing the two flavours is rejected.
-- Parameters
+- Parameters, named `espdr.espdr_demod_pol.<param>` as espdr names its own,
+  with the short form as the command-line alias:
   - `--null` (default: true): compute the null spectrum; ignored for
     2-exposure cycles
-  - `--stokes` (default: AUTO): Stokes parameter, or derive it from the
-    observing template
+  - `--stokes` (default: AUTO): `AUTO`, `I`, `Q`, `U` or `V`; AUTO derives it
+    from the observing template
+
+  On the command line pyesorex accepts only the alias and only with an `=`:
+  `--stokes=V`, after the recipe name. A recipe config file -- which is how
+  EDPS passes parameters -- takes the full name instead,
+  `espdr.espdr_demod_pol.stokes=V`.
 
 **Output**, sharing the prefix and timestamp of the first exposure:
 - `_S2D_POL_I.fits` — intensity, the mean of all beams
