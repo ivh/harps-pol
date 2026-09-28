@@ -11,6 +11,7 @@ from pyespdr.demod import (
     demodulate_cycles,
     read_s2d,
     split_cycles,
+    split_stokes,
     stokes_parameter,
     write_products,
 )
@@ -24,22 +25,10 @@ RECIPE = "espdr_demod_pol"
 #: ``settings`` by it too; the short form survives as the command-line alias.
 PREFIX = f"espdr.{RECIPE}."
 
-STOKES_CHOICES = ("AUTO", "I", "Q", "U", "V")
-
-
 def _aliased(parameter, alias: str):
     parameter.cli_alias = alias
     parameter.cfg_alias = alias
     return parameter
-
-
-def validate_stokes(value: str) -> str:
-    """pyesorex does not enforce a ParameterEnum's alternatives itself."""
-    if value not in STOKES_CHOICES:
-        raise ValueError(
-            f"--stokes={value!r} is not one of "
-            f"{', '.join(STOKES_CHOICES)}")
-    return value
 
 
 class DemodPol(cpl.ui.PyRecipe):
@@ -57,13 +46,15 @@ class DemodPol(cpl.ui.PyRecipe):
         "INPUT FRAMES\n"
         "  S2D_A / S2D_B              all exposures of one template, or\n"
         "  S2D_BLAZE_A / S2D_BLAZE_B  the blaze-corrected equivalent\n\n"
-        "OUTPUT FRAMES\n"
+        "OUTPUT FRAMES, per Stokes parameter in the template\n"
         "  S2D_POL_I                  intensity\n"
         "  S2D_POL_STOKES             Stokes parameter\n"
         "  S2D_POL_NULL               null spectrum (4-exposure cycles only)\n\n"
-        "The position of each exposure within the sequence is taken from the\n"
-        "retarder angle (ESO INS RET<n> POS), not from the order in which the\n"
-        "frames arrive, since the science recipe does not distinguish them."
+        "The position of each exposure within the sequence, and the Stokes\n"
+        "parameter it measures, are taken from the retarder angle\n"
+        "(ESO INS RET<n> POS): RET25 (quarter-wave) gives V, RET50\n"
+        "(half-wave) gives Q at multiples of 45 deg and U 22.5 deg off.  A\n"
+        "linear template interleaving Q and U yields both."
     )
 
     def __init__(self):
@@ -75,23 +66,12 @@ class DemodPol(cpl.ui.PyRecipe):
                     description="Compute the null spectrum (4-exposure cycles only)",
                     default=True,
                 ), "null"),
-                _aliased(cpl.ui.ParameterEnum(
-                    name=f"{PREFIX}stokes",
-                    context=RECIPE,
-                    description=(
-                        "Stokes parameter, or AUTO to derive it from the "
-                        "observing template"
-                    ),
-                    default="AUTO",
-                    alternatives=list(STOKES_CHOICES),
-                ), "stokes"),
             ]
         )
 
     def run(self, frameset: cpl.ui.FrameSet,
             settings: dict[str, Any]) -> cpl.ui.FrameSet:
         do_null = settings.get(f"{PREFIX}null", True)
-        stokes = validate_stokes(settings.get(f"{PREFIX}stokes", "AUTO"))
 
         specs_a, specs_b, blaze = _sort_frames(frameset)
         cpl.core.Msg.info(
@@ -99,7 +79,24 @@ class DemodPol(cpl.ui.PyRecipe):
             f"{len(specs_a)} exposures, "
             f"{'blaze-corrected' if blaze else 'un-corrected'} S2D",
         )
+        template = specs_a[0].tpl_name or specs_a[0].tpl_id or "unknown"
+        cpl.core.Msg.info(self._name, f"template {template}")
 
+        groups_a, groups_b = split_stokes(specs_a), split_stokes(specs_b)
+        if groups_a.keys() != groups_b.keys():
+            raise ValueError(f"Fibre A measures Stokes {list(groups_a)} but "
+                             f"fibre B {list(groups_b)}")
+
+        out = cpl.ui.FrameSet()
+        for stokes in groups_a:
+            for filename, catg in self._demodulate(
+                    groups_a[stokes], groups_b[stokes], do_null):
+                cpl.core.Msg.info(self._name, f"wrote {filename}")
+                out.append(cpl.ui.Frame(file=filename, tag=catg,
+                                        group=cpl.ui.Frame.FrameGroup.PRODUCT))
+        return out
+
+    def _demodulate(self, specs_a, specs_b, do_null: bool):
         cycles_a = split_cycles(specs_a)
         cycles_b = split_cycles(specs_b)
         if len(cycles_a) != len(cycles_b):
@@ -108,39 +105,27 @@ class DemodPol(cpl.ui.PyRecipe):
         for cycle_a, cycle_b in zip(cycles_a, cycles_b):
             _check_pairing(cycle_a, cycle_b)
 
-        template = cycles_a[0][0].tpl_name or cycles_a[0][0].tpl_id or "unknown"
-        cpl.core.Msg.info(self._name, f"template {template}")
+        stokes = stokes_parameter(cycles_a[0])
         for i, cycle in enumerate(cycles_a, start=1):
             cpl.core.Msg.info(
                 self._name,
-                f"cycle {i}/{len(cycles_a)}, retarder angles: "
-                + ", ".join(f"{s.angle:g}" for s in cycle),
+                f"Stokes {stokes} cycle {i}/{len(cycles_a)}, retarder "
+                f"angles: " + ", ".join(f"{s.angle:g}" for s in cycle),
             )
-
-        if stokes == "AUTO":
-            stokes = stokes_parameter(cycles_a[0])
-        cpl.core.Msg.info(self._name, f"Stokes parameter: {stokes}")
 
         nexp = len(cycles_a[0])
         want_null = do_null and nexp == 4
         if do_null and not want_null:
             cpl.core.Msg.warning(
-                self._name, "No null spectrum from a 2-exposure cycle")
+                self._name, f"No Stokes {stokes} null from a 2-exposure cycle")
 
         products = demodulate_cycles(cycles_a, cycles_b, null=want_null)
 
         inputs = [s for cycle in zip(cycles_a, cycles_b)
                   for pair in zip(*cycle) for s in pair]
         # pyesorex collects products from the working directory.
-        written = write_products(cycles_b[0][0], products, inputs, stokes,
-                                 outdir=".", version=VERSION)
-
-        out = cpl.ui.FrameSet()
-        for filename, catg in written:
-            cpl.core.Msg.info(self._name, f"wrote {filename}")
-            out.append(cpl.ui.Frame(file=filename, tag=catg,
-                                    group=cpl.ui.Frame.FrameGroup.PRODUCT))
-        return out
+        return write_products(cycles_b[0][0], products, inputs, stokes,
+                              outdir=".", version=VERSION)
 
 
 def _sort_frames(frameset: cpl.ui.FrameSet):

@@ -14,6 +14,7 @@ from pyespdr.demod import (
     demodulate_cycles,
     read_s2d,
     split_cycles,
+    split_stokes,
     stokes_parameter,
     write_products,
 )
@@ -31,8 +32,18 @@ def fiber_of(filename):
 
 def main(filenames):
     specs = [read_s2d(f, fiber_of(f)) for f in filenames]
-    cycles_a = split_cycles([s for s in specs if s.fiber == "A"])
-    cycles_b = split_cycles([s for s in specs if s.fiber == "B"])
+    groups_a = split_stokes([s for s in specs if s.fiber == "A"])
+    groups_b = split_stokes([s for s in specs if s.fiber == "B"])
+    if groups_a.keys() != groups_b.keys():
+        raise SystemExit(f"Fibre A measures Stokes {list(groups_a)} but "
+                         f"fibre B {list(groups_b)}")
+    for stokes in groups_a:
+        demodulate_one(groups_a[stokes], groups_b[stokes])
+
+
+def demodulate_one(specs_a, specs_b):
+    cycles_a = split_cycles(specs_a)
+    cycles_b = split_cycles(specs_b)
     if len(cycles_a) != len(cycles_b):
         raise SystemExit(f"{len(cycles_a)} fibre A but {len(cycles_b)} "
                          f"fibre B cycles")
@@ -48,7 +59,6 @@ def main(filenames):
               for pair in zip(*cycle) for s in pair]
     for filename, catg in write_products(cycles_b[0][0], products, inputs, stokes):
         print(f"  {catg:15s} {filename}")
-
 
 if __name__ == "__main__":
     if len(sys.argv) < 5 or (len(sys.argv) - 1) % 4:

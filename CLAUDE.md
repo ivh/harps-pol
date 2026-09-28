@@ -13,7 +13,7 @@ interface in `pyrecipes/`, real work in `pyespdr/`, EDPS extension in
 - Run anything through `uv`. On macOS prefix with `env -u DYLD_LIBRARY_PATH`, or
   an installed ESO pipeline's CPL shadows the one PyCPL bundles and imports die
   with `Symbol not found: _cpl_wcs_duplicate`.
-- `uv run pytest` — 33 tests. 20 need the reference data next door
+- `uv run pytest` — 48 tests. Most need the reference data next door
   (`../112.25MG.001/reduc`) and skip without it; the 3 workflow tests need
   `~/pipes/harps-3.6.0/workflows`.
 
@@ -48,8 +48,17 @@ Verified against programme 112.25MG.001, 2024-01-02.
   it to detect polarimetry in a reduced product.
 - **`ESO TPL NAME = HARPS_pol_obs_cir`** *does* survive into S2D, and is the
   reliable discriminator. Note `TPL ID` is the generic `HARPS_pol_obs_all`;
-  `TPL NAME` carries the `_cir` / `_lin` distinction. A linear template still
-  cannot tell you Q from U — that is in the half-wave plate angles.
+  `TPL NAME` carries the `_cir` / `_lin` distinction.
+- **Linear** (from archive headers, not from our own data): `ESO INS RET50
+  POS` is the half-wave plate, in raw frames with `DPR TECH = ECHELLE,LINPOL`
+  and `INS OPTI7 ID = LINPOL`. Q at multiples of 45, U at 22.5 off, confirmed
+  by `kappa-Pav-Stokes-Q`/`-U` (111.24ZW.001, 2023-05-27). Templates vary:
+  Q-only 4-exposure, U-only, and interleaved 0/22.5/45/67.5 (e.g. HR3454,
+  2025-03-15). Some OBs set RET50 to the *circular* angles 45/135/225/315,
+  which never swaps the beams; the recipe rejects those, correctly. 2009
+  commissioning frames carry junk (360, 382, 920). Archive headers are at
+  `https://archive.eso.org/hdr?DpId=<dp_id>`, frames found with TAP on
+  `dbo.raw` (`dp_tech LIKE '%LINPOL%'`).
 - `TPL EXPNO` / `TPL NEXP` / `TPL START` are all present in S2D, so template
   grouping needs no filename parsing.
 - **Fibre A has 71 orders, fibre B has 70.** The one B lacks is A index 44,
@@ -178,14 +187,14 @@ Getting these wrong fails silently, so:
   that same full name (`edps/executor/recipe.py:_prepare_config_file`). A bare
   `name="stokes"` is unreachable from a workflow, and a config file using the
   alias is rejected outright.
-- `cli_alias` keeps the short `--stokes` on the command line. pyesorex exposes
+- `cli_alias` keeps the short `--null` on the command line. pyesorex exposes
   *only* the alias there, never the full name — the opposite of the config
   file.
-- pyesorex wants `--stokes=V`, after the recipe name. `--stokes V` fails with
+- pyesorex wants `--null=false`, after the recipe name. `--null false` fails with
   `unrecognized arguments: <sof>`, blaming the SOF; the option before the
   recipe name fails with `Expected a recipe name`.
 - `ParameterEnum` documents its `alternatives` in the man page but pyesorex
-  does **not** enforce them; validate in the recipe (`validate_stokes`).
+  does **not** enforce them; validate in the recipe.
 - `settings` contains only what the user actually passed, not every declared
   parameter with its default, so `.get(name, default)` needs the default
   repeated.
@@ -207,5 +216,5 @@ Getting these wrong fails silently, so:
 
 See the end of README.md. The short version: the `S2D_POL_*` PRO.CATG values
 are invented and need registering with ESO, product provenance is hand-written
-rather than from `cpl.dfs`, and the linear-polarimetry template name and its
-Q/U convention are unknown for want of data.
+rather than from `cpl.dfs`, and linear polarimetry has only been tested on
+faked headers.

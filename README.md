@@ -21,15 +21,14 @@ arrives as 4 or 8 S2D files. This recipe combines them with the ratio method.
   with the short form as the command-line alias:
   - `--null` (default: true): compute the null spectrum; ignored for
     2-exposure cycles
-  - `--stokes` (default: AUTO): `AUTO`, `I`, `Q`, `U` or `V`; AUTO derives it
-    from the observing template
 
   On the command line pyesorex accepts only the alias and only with an `=`:
-  `--stokes=V`, after the recipe name. A recipe config file -- which is how
+  `--null=false`, after the recipe name. A recipe config file -- which is how
   EDPS passes parameters -- takes the full name instead,
-  `espdr.espdr_demod_pol.stokes=V`.
+  `espdr.espdr_demod_pol.null=false`.
 
-**Output**, sharing the prefix and timestamp of the first exposure:
+**Output**, one set per Stokes parameter in the template, sharing the prefix
+and timestamp of its first exposure:
 - `_S2D_POL_I.fits` — intensity, the mean of all beams
 - `_S2D_POL_STOKES.fits` — the Stokes parameter
 - `_S2D_POL_NULL.fits` — null spectrum, 4-exposure cycles only
@@ -37,23 +36,27 @@ arrives as 4 or 8 S2D files. This recipe combines them with the ratio method.
 **Sequence ordering.** `espdr_sci_red` does not classify its products by
 retarder angle, and the workflow is free to hand the frames over in any order,
 so the recipe takes each exposure's place in the sequence from `ESO INS RET<n>
-POS` in its own header. Sorting by angle gives the 90-degree pairs — (45, 135)
-and (225, 315) — that the ratio method needs.
+POS` in its own header. Each angle puts the beams one way round or swapped;
+the ratio method pairs one of each, unswapped first: (45, 135) and (225, 315)
+for V, (0, 45) and (90, 135) for Q, (22.5, 67.5) and (112.5, 157.5) for U.
 
 **Repeated cycles.** A longer template is the same cycle observed again, so the
 exposures are walked in `ESO TPL EXPNO` order and a new cycle is started
-whenever an angle comes round again. Each cycle is demodulated on its own — so
+whenever an angle comes round again or the cycle has 4 exposures. Each cycle is demodulated on its own — so
 one taken in worse conditions cannot quietly drag the others, and each gets its
 own null — and the Stokes and null spectra are then combined by inverse-variance
 weighting. The intensity is the plain mean, as it already is within a cycle. The
 number of cycles lands in `ESO QC POL NCYCLE`. All input frames must come from
 one template (`ESO TPL ID` + `ESO TPL START`).
 
-**Stokes parameter.** Taken from the observing template, `ESO TPL NAME`:
-`HARPS_pol_obs_cir` means Stokes V. A linear template does not say whether it is
-Q or U — that depends on the half-wave plate angles — so that needs `--stokes`.
-If the template name is missing the recipe falls back on the retarder unit,
-where RET25 is the quarter-wave plate and hence V.
+**Stokes parameter.** Taken from the retarder: RET25, the quarter-wave plate,
+gives V; RET50, the half-wave plate, gives Q at multiples of 45 degrees and U
+22.5 degrees off. The observing template (`HARPS_pol_obs_cir` / `_lin`) only
+has to agree. A linear template often interleaves the two (0, 22.5, 45, 67.5),
+and then yields both a Q and a U set of products. The convention was checked
+against archive OBs named for what they measure (`kappa-Pav-Stokes-Q` /
+`-Stokes-U`, 111.24ZW.001); the *sign* of Q and U has not been checked against
+a polarisation standard.
 
 **Order matching.** Fibre B is extracted with one order fewer than fibre A. The
 orders are matched by their first wavelength rather than by a hard-coded index,
@@ -243,5 +246,11 @@ initialized`.
   pipeline proper.
 - Why fibre B is extracted with one order fewer, and whether it is always the
   same order.
-- `TEMPLATE_STOKES` only knows `HARPS_pol_obs_cir`. The linear template's name
-  and its Q/U angle convention need filling in once there is linear data.
+- Linear polarimetry is untested on real S2D products: no linear data has been
+  reduced yet, so that `ESO INS RET50 POS` survives into S2D is assumed from
+  RET25 doing so. The sign of Q and U is unverified.
+- Much archival HARPSpol data is taken one exposure per template, a whole
+  sequence spread over one OB: 884 of 2886 linear frames (872 of 1404
+  templates, none after 2017), and roughly 13% of circular frames. Grouping on
+  `ESO TPL START` never collects those into a cycle; they would need grouping on
+  `ESO OBS ID` (or `OBS START`) instead.

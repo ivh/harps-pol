@@ -27,22 +27,11 @@ def test_parameters_follow_the_espdr_naming_convention():
     """
     module = _module()
     names = {p.name for p in module.DemodPol().parameters}
-    assert names == {"espdr.espdr_demod_pol.null",
-                     "espdr.espdr_demod_pol.stokes"}
+    assert names == {"espdr.espdr_demod_pol.null"}
 
 
 def test_the_command_line_keeps_the_short_names():
     module = _module()
     aliases = {p.cli_alias for p in module.DemodPol().parameters}
-    assert aliases == {"null", "stokes"}
+    assert aliases == {"null"}
 
-
-@pytest.mark.parametrize("value", ["AUTO", "I", "Q", "U", "V"])
-def test_stokes_accepts_every_advertised_choice(value):
-    assert _module().validate_stokes(value) == value
-
-
-def test_stokes_rejects_anything_else():
-    """pyesorex does not enforce a ParameterEnum's alternatives itself."""
-    with pytest.raises(ValueError, match="not one of"):
-        _module().validate_stokes("banana")

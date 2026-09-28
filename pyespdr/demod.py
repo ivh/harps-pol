@@ -34,16 +34,25 @@ RECIPE_NAME = "espdr_demod_pol"
 
 _RET_KEY = re.compile(r"^ESO INS RET(\d+) POS$")
 
-#: Observing template suffix -> Stokes parameter.  The template says what the
-#: observer set out to measure, which beats inferring it from the hardware.  A
-#: linear template does not say whether it is Q or U -- that depends on the
-#: half-wave plate angles -- so it has to be given explicitly.
-TEMPLATE_STOKES = {"cir": "V"}
+#: Retarder unit -> (multiple of the plate angle the beams respond to,
+#: {that phase: (Stokes parameter, which way round the beams are)}).  RET25 is
+#: the quarter-wave plate, swapping the V beams every 90 degrees; RET50 the
+#: half-wave plate, swapping the Q beams every 45 degrees, with U 22.5 degrees
+#: off.  Checked against archive OBs named for what they measure:
+#: kappa-Pav-Stokes-Q (111.24ZW.001) runs RET50 at 0/45/90/135 and
+#: kappa-Pav-Stokes-U at 22.5/67.5/112.5/157.5.
+MODULATION = {
+    25: (2, {90: ("V", +1), 270: ("V", -1)}),
+    50: (4, {0: ("Q", +1), 90: ("U", +1), 180: ("Q", -1), 270: ("U", -1)}),
+}
 
-#: Fallback when the template name is missing: retarder unit -> Stokes
-#: parameter.  RET25 is the quarter-wave plate (DPR.TECH = ECHELLE,CIRPOL in
-#: the raw frames).
-RETARDER_STOKES = {25: "V"}
+#: Observing template suffix -> the Stokes parameters it can measure, to catch
+#: a header whose retarder disagrees with the template.
+TEMPLATE_STOKES = {"cir": {"V"}, "lin": {"Q", "U"}}
+
+#: The ratio method needs no more than two pairs per cycle; a longer run of
+#: distinct angles (RET50 at 0, 45, ..., 315) is two cycles.
+MAX_CYCLE = 4
 
 #: Two orders are the same order if their first wavelength agrees to this many
 #: Angstrom.  Adjacent echelle orders start ~40 A apart, so this is very loose.
@@ -77,6 +86,14 @@ class Spectrum:
         return self.flux.shape[0]
 
     @property
+    def stokes(self) -> str:
+        return modulation(self.retarder, self.angle)[0]
+
+    @property
+    def sign(self) -> int:
+        return modulation(self.retarder, self.angle)[1]
+
+    @property
     def template(self) -> tuple[str, str]:
         """Identity of the observing template this exposure belongs to."""
         return (self.tpl_id, self.tpl_start)
@@ -94,6 +111,21 @@ def retarder_angle(header: fits.Header) -> tuple[int, float]:
                          f"{[n for n, _ in found]}")
     unit, angle = found[0]
     return unit, float(angle) % 360.0
+
+
+def modulation(unit: int, angle: float) -> tuple[str, int]:
+    """(Stokes parameter, beam sign) that retarder ``unit`` at ``angle`` gives."""
+    try:
+        factor, states = MODULATION[unit]
+    except KeyError:
+        raise ValueError(f"Unknown retarder unit RET{unit}") from None
+    phase = (factor * angle) % 360.0
+    for centre, state in states.items():
+        if abs((phase - centre + 180.0) % 360.0 - 180.0) <= factor * ANGLE_TOL:
+            return state
+    stokes = "/".join(sorted({st for st, _ in states.values()}))
+    raise ValueError(f"RET{unit} at {angle:g} deg is not a position that "
+                     f"modulates Stokes {stokes}")
 
 
 def read_s2d(filename: str, fiber: str) -> Spectrum:
@@ -147,9 +179,11 @@ def match_orders(wave_a: np.ndarray, wave_b: np.ndarray) -> np.ndarray:
 def order_sequence(specs: Sequence[Spectrum]) -> list[Spectrum]:
     """Put the exposures of one fibre into demodulation order, by angle.
 
-    The ratio method pairs consecutive exposures whose retarder angles differ by
-    90 degrees: (45, 135) and, for a 4-exposure sequence, (225, 315).  Sorting
-    by angle produces exactly that pairing.
+    The ratio method pairs an exposure with the beams one way round with one
+    that has them swapped, the former first: (45, 135) and (225, 315) for V,
+    (0, 45) and (90, 135) for Q, (22.5, 67.5) and (112.5, 157.5) for U.  The
+    beam sign comes from the angle, so a sequence that starts on a swapped
+    position still gets the Stokes parameter the right way up.
     """
     n = len(specs)
     if n not in (2, 4):
@@ -165,40 +199,53 @@ def order_sequence(specs: Sequence[Spectrum]) -> list[Spectrum]:
         raise ValueError(f"Repeated retarder angles in sequence: {angles}. "
                          f"Split the template into sub-sequences first.")
 
-    for first, second in zip(ordered[0::2], ordered[1::2]):
-        sep = (second.angle - first.angle) % 360.0
-        if abs(sep - 90.0) > ANGLE_TOL:
-            raise ValueError(
-                f"Exposures at {first.angle:g} and {second.angle:g} deg are "
-                f"not a 90-degree pair ({sep:g} deg apart)")
-    return ordered
+    stokes = {s.stokes for s in ordered}
+    if len(stokes) != 1:
+        raise ValueError(f"Sequence mixes Stokes {sorted(stokes)} at angles "
+                         f"{angles}; split it with split_stokes first")
+
+    plus = [s for s in ordered if s.sign > 0]
+    minus = [s for s in ordered if s.sign < 0]
+    if len(plus) != len(minus):
+        raise ValueError(
+            f"Retarder angles {angles} put the beams one way round "
+            f"{len(plus)} times and swapped {len(minus)} times; the ratio "
+            f"method needs as many of each")
+    return [s for pair in zip(plus, minus) for s in pair]
 
 
 def stokes_parameter(specs: Sequence[Spectrum]) -> str:
     """Which Stokes parameter this sequence measures.
 
-    Taken from the observing template (``HARPS_pol_obs_cir`` and friends), which
-    records what the observer meant to do, and falls back on the retarder unit
-    when the template name is missing.
+    The retarder unit and angle decide it; the observing template
+    (``HARPS_pol_obs_cir`` / ``_lin``) only has to agree.
     """
+    found = {s.stokes for s in specs}
+    if len(found) != 1:
+        raise ValueError(f"Sequence mixes Stokes {sorted(found)}; split it "
+                         f"with split_stokes first")
+    stokes = found.pop()
+
     name = specs[0].tpl_name
     suffix = name.rsplit("_", 1)[-1].lower() if name else ""
-    if suffix in TEMPLATE_STOKES:
-        return TEMPLATE_STOKES[suffix]
-    if suffix == "lin":
+    allowed = TEMPLATE_STOKES.get(suffix)
+    if allowed is not None and stokes not in allowed:
         raise ValueError(
-            f"Template {name!r} is linear polarimetry, which does not say "
-            f"whether this is Stokes Q or U; give the Stokes parameter "
-            f"explicitly.")
+            f"Retarder angles say Stokes {stokes}, but template {name!r} "
+            f"measures {'/'.join(sorted(allowed))}")
+    return stokes
 
-    unit = specs[0].retarder
-    try:
-        return RETARDER_STOKES[unit]
-    except KeyError:
-        raise ValueError(
-            f"Template {name!r} is not a known polarimetric template and "
-            f"retarder unit RET{unit} is unknown; give the Stokes parameter "
-            f"explicitly.") from None
+
+def split_stokes(specs: Sequence[Spectrum]) -> dict[str, list[Spectrum]]:
+    """Group one fibre's exposures by the Stokes parameter they measure.
+
+    A linear template may interleave Q and U -- RET50 at 0, 22.5, 45, 67.5 is
+    common in the archive -- and each is demodulated on its own.
+    """
+    groups: dict[str, list[Spectrum]] = {}
+    for spec in specs:
+        groups.setdefault(spec.stokes, []).append(spec)
+    return dict(sorted(groups.items()))
 
 
 def split_cycles(specs: Sequence[Spectrum]) -> list[list[Spectrum]]:
@@ -206,8 +253,8 @@ def split_cycles(specs: Sequence[Spectrum]) -> list[list[Spectrum]]:
 
     A longer template is just the 2- or 4-exposure cycle repeated for signal to
     noise, so walk the exposures in template order and start a new cycle
-    whenever a retarder angle comes round again.  Each cycle is then put in
-    angle order by :func:`order_sequence`.
+    whenever a retarder angle comes round again or the cycle is full.  Each
+    cycle is then put in angle order by :func:`order_sequence`.
     """
     if not specs:
         raise ValueError("No exposures to split into cycles")
@@ -221,7 +268,7 @@ def split_cycles(specs: Sequence[Spectrum]) -> list[list[Spectrum]]:
     current: list[Spectrum] = []
     seen: set[float] = set()
     for spec in sorted(specs, key=lambda s: (s.expno, s.mjd)):
-        if spec.angle in seen:
+        if spec.angle in seen or len(current) == MAX_CYCLE:
             cycles.append(current)
             current, seen = [], set()
         current.append(spec)
@@ -608,10 +655,8 @@ def _set_product_header(header: fits.Header, catg: str,
     new = {
         f"ESO PRO REC{rec} ID": RECIPE_NAME,
         f"ESO PRO REC{rec} PIPE ID": f"pyespdr/{version}",
-        f"ESO PRO REC{rec} PARAM1 NAME": "stokes",
-        f"ESO PRO REC{rec} PARAM1 VALUE": stokes,
-        f"ESO PRO REC{rec} PARAM2 NAME": "nexp",
-        f"ESO PRO REC{rec} PARAM2 VALUE": str(len(inputs) // 2),
+        f"ESO PRO REC{rec} PARAM1 NAME": "nexp",
+        f"ESO PRO REC{rec} PARAM1 VALUE": str(len(inputs) // 2),
         "ESO QC POL NCYCLE": ncycles,
         "ESO QC POL ANGLES": ",".join(
             f"{s.angle:g}" for s in inputs if s.fiber == "A"),

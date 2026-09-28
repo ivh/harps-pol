@@ -26,11 +26,13 @@ from pyespdr.demod import (
     demodulate,
     demodulate_cycles,
     match_orders,
+    modulation,
     order_sequence,
     read_s2d,
     resample_spectrum,
     retarder_angle,
     split_cycles,
+    split_stokes,
     stokes_parameter,
     write_products,
 )
@@ -170,12 +172,25 @@ def test_sequence_order_comes_from_the_angle():
     assert [s.filename for s in shuffled_b] == [s.filename for s in seq_b]
 
 
-def test_rejects_a_sequence_that_is_not_ninety_degree_pairs():
+def test_rejects_an_angle_that_does_not_modulate():
     stamps, flavour = SEQUENCES["29 CMa"]
     seq_a, _ = _load(stamps, flavour)
     seq_a[1].angle = 200.0
-    with pytest.raises(ValueError, match="90-degree pair"):
+    with pytest.raises(ValueError, match="not a position"):
         order_sequence(seq_a)
+
+
+def test_rejects_a_sequence_that_never_swaps_the_beams():
+    seq_a, _ = _load(SEQUENCES["HD 54879"][0], "")
+    seq_a[1].angle = 225.0
+    with pytest.raises(ValueError, match="as many of each"):
+        order_sequence(seq_a)
+
+
+def test_a_sequence_starting_swapped_is_put_the_right_way_up():
+    seq_a, _ = _load(SEQUENCES["HD 54879"][0], "")
+    seq_a[0].angle, seq_a[1].angle = 225.0, 135.0
+    assert [s.angle for s in order_sequence(seq_a)] == [225.0, 135.0]
 
 
 def test_orders_are_matched_by_wavelength_not_by_index():
@@ -247,11 +262,62 @@ def test_stokes_comes_from_the_template_name():
     assert stokes_parameter(seq_a) == "V"
 
 
-def test_linear_template_demands_an_explicit_stokes_parameter():
+@pytest.mark.parametrize("unit, angle, state", [
+    (25, 45.0, ("V", +1)), (25, 135.0, ("V", -1)),
+    (25, 225.0, ("V", +1)), (25, 315.0, ("V", -1)),
+    (50, 0.0, ("Q", +1)), (50, 45.0, ("Q", -1)),
+    (50, 90.0, ("Q", +1)), (50, 135.0, ("Q", -1)),
+    (50, 22.5, ("U", +1)), (50, 67.5, ("U", -1)),
+    (50, 112.5, ("U", +1)), (50, 157.5, ("U", -1)),
+    (50, 359.8, ("Q", +1)),
+])
+def test_retarder_angle_decides_the_stokes_parameter(unit, angle, state):
+    assert modulation(unit, angle) == state
+
+
+@pytest.mark.parametrize("unit, angle", [(25, 0.0), (25, 90.0), (50, 10.0)])
+def test_angles_between_the_modulation_states_are_rejected(unit, angle):
+    with pytest.raises(ValueError, match="not a position"):
+        modulation(unit, angle)
+
+
+def _as_linear(seq, angles):
+    """Fake a HARPS_pol_obs_lin template: the half-wave plate at ``angles``."""
+    return [dataclasses.replace(s, retarder=50, angle=a, expno=i,
+                                tpl_name="HARPS_pol_obs_lin")
+            for i, (s, a) in enumerate(zip(seq, angles), start=1)]
+
+
+def test_interleaved_linear_template_splits_into_q_and_u():
+    """RET50 at 0, 22.5, 45, 67.5: one Q pair and one U pair, as in the archive."""
+    seq_a, _ = _load(SEQUENCES["29 CMa"][0], "")
+    groups = split_stokes(_as_linear(seq_a, [0.0, 22.5, 45.0, 67.5]))
+    assert list(groups) == ["Q", "U"]
+    for stokes, angles in (("Q", [0.0, 45.0]), ("U", [22.5, 67.5])):
+        (cycle,) = split_cycles(groups[stokes])
+        assert [s.angle for s in cycle] == angles
+        assert stokes_parameter(cycle) == stokes
+
+
+def test_eight_distinct_half_wave_angles_are_two_cycles():
+    seq_a, _ = _load(SEQUENCES["29 CMa"][0], "")
+    linear = _as_linear(seq_a + seq_a, [0, 45, 90, 135, 180, 225, 270, 315])
+    cycles = split_cycles(linear)
+    assert [[s.angle for s in c] for c in cycles] == [
+        [0, 45, 90, 135], [180, 225, 270, 315]]
+
+
+def test_stokes_parameter_rejects_a_mixed_sequence():
+    seq_a, _ = _load(SEQUENCES["29 CMa"][0], "")
+    with pytest.raises(ValueError, match="split_stokes"):
+        stokes_parameter(_as_linear(seq_a, [0.0, 22.5, 45.0, 67.5]))
+
+
+def test_template_has_to_agree_with_the_retarder():
     seq_a, _ = _load(SEQUENCES["HD 54879"][0], "")
     linear = [dataclasses.replace(s, tpl_name="HARPS_pol_obs_lin")
               for s in seq_a]
-    with pytest.raises(ValueError, match="Q or U"):
+    with pytest.raises(ValueError, match="measures Q/U"):
         stokes_parameter(linear)
 
 
