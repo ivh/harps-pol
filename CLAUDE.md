@@ -13,7 +13,7 @@ interface in `pyrecipes/`, real work in `pyespdr/`, EDPS extension in
 - Run anything through `uv`. On macOS prefix with `env -u DYLD_LIBRARY_PATH`, or
   an installed ESO pipeline's CPL shadows the one PyCPL bundles and imports die
   with `Symbol not found: _cpl_wcs_duplicate`.
-- `uv run pytest` — 48 tests. Most need the reference data next door
+- `uv run pytest` — 55 tests. Most need the reference data next door
   (`../112.25MG.001/reduc`) and skip without it; the 3 workflow tests need
   `~/pipes/harps-3.6.0/workflows`.
 
